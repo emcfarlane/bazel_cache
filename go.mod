@@ -1,4 +1,4 @@
-module github.com/afking/bazel_cache
+module github.com/emcfarlane/bazel_cache
 
 go 1.12
 

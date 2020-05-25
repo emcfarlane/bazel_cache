@@ -1,7 +1,7 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
 load("@bazel_gazelle//:def.bzl", "gazelle")
 
-# gazelle:prefix github.com/afking/bazel_cache
+# gazelle:prefix github.com/emcfarlane/bazel_cache
 gazelle(name = "gazelle")
 
 go_library(
@@ -10,7 +10,7 @@ go_library(
         "main.go",
         "server.go",
     ],
-    importpath = "github.com/afking/bazel_cache",
+    importpath = "github.com/emcfarlane/bazel_cache",
     visibility = ["//visibility:private"],
     deps = [
         "@dev_gocloud//blob:go_default_library",

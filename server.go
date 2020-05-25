@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"path"
 	"strings"
@@ -14,10 +16,12 @@ import (
 
 	"gocloud.dev/blob"
 	"gocloud.dev/gcerrors"
+	"google.golang.org/grpc"
 )
 
 type server struct {
-	*http.Server
+	httpServer *http.Server
+	grpcServer *grpc.Server
 
 	bucket *blob.Bucket
 }
@@ -218,15 +222,56 @@ func (s *server) Open(name string) (http.File, error) {
 	}, nil
 }
 
+func (s *server) Serve(l *net.Listener) error {
+
+	m := cmux.New(l)
+	httpL := m.Match(cmux.HTTP1Fast())
+	grpcL := m.Match(cmux.Any())
+
+	c := make(chan error, 2)
+	go func() { c <- s.grpcServer.Serve(grpcL) }()
+	defer func() {
+		s.grpcServer.GracefulStop()
+	}
+
+	go func() { c <- s.httpServer.Serve(httpL) }()
+	defer func() {
+		s.httpServer.Shutdown(context.Background())
+	}
+
+	select {
+	case err := <-c:
+		return err
+	}
+}
+
 func NewServer(bucket *blob.Bucket) (*server, error) {
 	mux := http.NewServeMux()
 	s := &server{
-		Server: &http.Server{
-			Handler: mux,
+		httpServer: &http.Server{
+			Handler: &ochttp.Handler{
+				Handler: mux,
+			},
 		},
+		grpcServer: grpc.NewServer(),
 		bucket: bucket,
 	}
+
+	zpages.Handle(mux, "/debug/")
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	mux.Handle("/cache/", s.handleErr(s.cache))
 	mux.Handle("/", http.FileServer(s))
+
+	exporter, err := prometheus.NewExporter(prometheus.Options{})
+	if err != nil {
+		return nil, err
+	}
+	view.RegisterExporter(exporter)
+	mux.Handle("/metrics", exporter)
+
 	return s, nil
 }
